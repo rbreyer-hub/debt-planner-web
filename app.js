@@ -3,6 +3,21 @@ const STORAGE_KEY = 'debtPlannerData';
 const DEBT_COLOR_VALUES = ['#4fd1a0','#60a8f0','#f0c060','#f07070','#c060f0','#f09060','#60d0f0','#90f070'];
 function colorValue(idx) { return DEBT_COLOR_VALUES[idx % DEBT_COLOR_VALUES.length]; }
 
+/* Experian report snapshot — Jun 2026. APR + due day left blank for user to fill in. */
+const EXPERIAN_SEED_DEBTS = [
+  { id:'seed01', name:'Affirm (BNPL #1)',         type:'other',         balance:58,     limit:0,     apr:0, minPayment:42,   dueDay:0 },
+  { id:'seed02', name:'Affirm (BNPL #2)',         type:'other',         balance:99,     limit:0,     apr:0, minPayment:25,   dueDay:0 },
+  { id:'seed03', name:'Capital One',              type:'credit_card',   balance:1764,   limit:2000,  apr:0, minPayment:39,   dueDay:0 },
+  { id:'seed04', name:'Chime Secured Card',       type:'credit_card',   balance:245,    limit:0,     apr:0, minPayment:0,    dueDay:0 },
+  { id:'seed05', name:'Citi',                     type:'credit_card',   balance:3731,   limit:4000,  apr:0, minPayment:103,  dueDay:0 },
+  { id:'seed06', name:'Citi (authorized user)',   type:'credit_card',   balance:6752,   limit:7010,  apr:0, minPayment:197,  dueDay:0 },
+  { id:'seed07', name:'Columbia Bank (Mortgage)', type:'other',         balance:342005, limit:0,     apr:0, minPayment:1997, dueDay:0 },
+  { id:'seed08', name:'Idaho Central CU',         type:'personal_loan', balance:17336,  limit:0,     apr:0, minPayment:438,  dueDay:0 },
+  { id:'seed09', name:'JPMCB Card (auth user)',   type:'credit_card',   balance:9561,   limit:13300, apr:0, minPayment:278,  dueDay:0 },
+  { id:'seed10', name:'SYNCB / Networking',       type:'credit_card',   balance:1196,   limit:1350,  apr:0, minPayment:42,   dueDay:0 },
+  { id:'seed11', name:'SYNCB / Venmo',            type:'credit_card',   balance:404,    limit:640,   apr:0, minPayment:41,   dueDay:0 },
+];
+
 let state = {
   debts: [],
   strategy: 'snowball',
@@ -23,7 +38,12 @@ function save() {
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
+    if (!raw) {
+      state.debts       = EXPERIAN_SEED_DEBTS.map(d => Object.assign({}, d));
+      state.creditScore = 673;
+      save();
+      return;
+    }
     const d = JSON.parse(raw);
     state.debts = d.debts || [];
     state.strategy = d.strategy || 'snowball';
