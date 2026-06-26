@@ -4,6 +4,17 @@ const DEBT_COLOR_VALUES = ['#4fd1a0','#60a8f0','#f0c060','#f07070','#c060f0','#f
 function colorValue(idx) { return DEBT_COLOR_VALUES[idx % DEBT_COLOR_VALUES.length]; }
 
 /* Experian report snapshot — Jun 2026. APR + due day left blank for user to fill in. */
+window.EXPERIAN_SEED_DEBTS_IDS = ['seed01','seed02','seed03','seed04','seed05','seed06','seed07','seed08','seed09','seed10','seed11'];
+window.applySeedMerge = function(jsonStr) {
+  try {
+    const parsed = JSON.parse(jsonStr);
+    const existing = parsed.debts || [];
+    const existingIds = new Set(existing.map(x => x.id));
+    const missing = EXPERIAN_SEED_DEBTS.filter(s => !existingIds.has(s.id)).map(s => Object.assign({}, s));
+    if (missing.length === 0) return jsonStr;
+    return JSON.stringify(Object.assign({}, parsed, { debts: [...existing, ...missing] }));
+  } catch (_) { return jsonStr; }
+};
 const EXPERIAN_SEED_DEBTS = [
   { id:'seed01', name:'Affirm (BNPL #1)',         type:'other',         balance:58,     limit:0,     apr:0, minPayment:42,   dueDay:0 },
   { id:'seed02', name:'Affirm (BNPL #2)',         type:'other',         balance:99,     limit:0,     apr:0, minPayment:25,   dueDay:0 },
@@ -45,10 +56,14 @@ function load() {
       return;
     }
     const d = JSON.parse(raw);
-    state.debts = d.debts || [];
+    const existing = d.debts || [];
+    const existingIds = new Set(existing.map(x => x.id));
+    const missing = EXPERIAN_SEED_DEBTS.filter(s => !existingIds.has(s.id)).map(s => Object.assign({}, s));
+    state.debts = [...existing, ...missing];
     state.strategy = d.strategy || 'snowball';
     state.extraPayment = d.extraPayment || 0;
-    state.creditScore = d.creditScore || null;
+    state.creditScore = d.creditScore || 673;
+    if (missing.length > 0) save();
   } catch (e) { /* ignore */ }
 }
 
@@ -310,7 +325,10 @@ function renderDebts() {
         <h2 class="section-title">My Debts</h2>
         <p class="section-sub" style="margin:0">Track all your credit cards, loans, and lines of credit.</p>
       </div>
-      <button class="btn btn-primary" onclick="openDebtModal()">+ Add Debt</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${state.debts.some(d => d.id && d.id.startsWith('seed')) ? '' : `<button class="btn" style="background:var(--surface-2);color:var(--text)" onclick="importExperianDebts()">Import Experian Debts</button>`}
+        <button class="btn btn-primary" onclick="openDebtModal()">+ Add Debt</button>
+      </div>
     </div>
 
     ${state.debts.length === 0 ? `
@@ -868,6 +886,16 @@ function deleteDebt(id) {
   save();
   renderActiveTab();
   showToast('Debt removed.');
+}
+
+function importExperianDebts() {
+  const existingIds = new Set(state.debts.map(d => d.id));
+  const toAdd = EXPERIAN_SEED_DEBTS.filter(s => !existingIds.has(s.id)).map(s => Object.assign({}, s));
+  if (toAdd.length === 0) { showToast('All Experian debts already present.'); return; }
+  state.debts = [...state.debts, ...toAdd];
+  save();
+  renderDebts();
+  showToast(`Added ${toAdd.length} Experian debts.`);
 }
 
 /* ── Actions ─────────────────────────────────────────────── */
