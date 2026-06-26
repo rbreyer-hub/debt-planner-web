@@ -357,11 +357,13 @@ function renderDebts() {
                 <span>Min: <strong style="color:var(--text)">${fmt(d.minPayment)}/mo</strong></span>
                 ${d.dueDay ? `<span>Due: <strong style="color:var(--text)">Day ${d.dueDay}</strong></span>` : ''}
                 ${d.limit > 0 ? `<span>Limit: <strong style="color:var(--text)">${fmt(d.limit)}</strong></span>` : ''}
+                ${d.payments && d.payments.length > 0 ? `<span>Last paid: <strong style="color:var(--green)">${fmt(d.payments[d.payments.length-1].amount)} on ${d.payments[d.payments.length-1].date}</strong></span>` : ''}
               </div>
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
               <span class="debt-balance">${fmt(d.balance)}</span>
               <div class="debt-actions">
+                <button class="btn-icon" title="Make Payment" onclick="openPaymentModal('${d.id}')">💳</button>
                 <button class="btn-icon" title="Edit" onclick="openDebtModal('${d.id}')">✏️</button>
                 <button class="btn-icon danger" title="Delete" onclick="deleteDebt('${d.id}')">🗑️</button>
               </div>
@@ -888,6 +890,53 @@ function deleteDebt(id) {
   showToast('Debt removed.');
 }
 
+/* ── Payment modal ───────────────────────────────────────── */
+function openPaymentModal(id) {
+  const debt = state.debts.find(d => d.id === id);
+  if (!debt) return;
+  document.getElementById('paymentDebtId').value = id;
+  document.getElementById('paymentDebtName').textContent = debt.name;
+  document.getElementById('paymentDebtBalance').textContent = 'Current balance: ' + fmt(debt.balance);
+  document.getElementById('paymentAmount').value = debt.minPayment || '';
+  document.getElementById('paymentDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('paymentNote').value = '';
+  document.getElementById('paymentModal').style.display = 'flex';
+  document.getElementById('paymentAmount').focus();
+}
+
+function closePaymentModal() {
+  document.getElementById('paymentModal').style.display = 'none';
+}
+
+function savePayment() {
+  const id = document.getElementById('paymentDebtId').value;
+  const amount = parseFloat(document.getElementById('paymentAmount').value);
+  const date = document.getElementById('paymentDate').value;
+  const note = document.getElementById('paymentNote').value.trim();
+
+  if (!amount || amount <= 0) { showToast('Enter a valid payment amount.'); return; }
+  if (!date) { showToast('Enter a payment date.'); return; }
+
+  const idx = state.debts.findIndex(d => d.id === id);
+  if (idx < 0) return;
+
+  const debt = state.debts[idx];
+  const newBalance = Math.max(0, Math.round((debt.balance - amount) * 100) / 100);
+  const payment = { date, amount };
+  if (note) payment.note = note;
+
+  state.debts[idx] = {
+    ...debt,
+    balance: newBalance,
+    payments: [...(debt.payments || []), payment]
+  };
+
+  save();
+  closePaymentModal();
+  renderDebts();
+  showToast(`Payment of ${fmt(amount)} recorded. New balance: ${fmt(newBalance)}`);
+}
+
 function importExperianDebts() {
   const existingIds = new Set(state.debts.map(d => d.id));
   const toAdd = EXPERIAN_SEED_DEBTS.filter(s => !existingIds.has(s.id)).map(s => Object.assign({}, s));
@@ -934,8 +983,11 @@ document.addEventListener('DOMContentLoaded', () => {
   load();
   switchTab('overview');
 
-  // Close modal on overlay click
+  // Close modals on overlay click
   document.getElementById('debtModal').addEventListener('click', (e) => {
     if (e.target === document.getElementById('debtModal')) closeDebtModal();
+  });
+  document.getElementById('paymentModal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('paymentModal')) closePaymentModal();
   });
 });
