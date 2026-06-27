@@ -170,7 +170,7 @@ function calcStrategySchedule(debtsInput, extraPayment, strategy) {
 
   while (debts.some(d => d.balance > 0.005) && months.length < 600) {
     const priorityIdx = debts.findIndex(d => !paidIds.has(d.id) && d.balance > 0.005);
-    const snap = { month: months.length + 1, focusId: debts[priorityIdx]?.id, focusName: debts[priorityIdx]?.name, perDebt: [], totalPayment: 0, totalInterest: 0, totalBalance: 0, paidOffThis: [] };
+    const snap = { month: months.length + 1, focusId: debts[priorityIdx]?.id, focusName: debts[priorityIdx]?.name, perDebt: [], totalMinDue: 0, totalInterest: 0, totalBalance: 0, paidOffThis: [] };
 
     for (let i = 0; i < debts.length; i++) {
       const d = debts[i];
@@ -180,10 +180,11 @@ function calcStrategySchedule(debtsInput, extraPayment, strategy) {
       d.balance += interest;
       const extra = i === priorityIdx ? extraPayment + rolledOver : 0;
       const payment = Math.min(d.minPayment + extra, d.balance);
+      const minDue = Math.min(d.minPayment, d.balance);
       const principal = payment - interest;
       d.balance = Math.max(0, d.balance - payment);
-      snap.perDebt.push({ id: d.id, name: d.name, payment, interest, principal, balance: d.balance, extra });
-      snap.totalPayment += payment;
+      snap.perDebt.push({ id: d.id, name: d.name, payment, interest, principal, balance: d.balance, extra, minDue });
+      snap.totalMinDue += minDue;
       snap.totalInterest += interest;
       snap.totalBalance += d.balance;
       if (d.balance < 0.005 && !paidIds.has(d.id)) {
@@ -609,9 +610,9 @@ function renderStrategyScheduleTable(now, monthNames) {
               <th>Date</th>
               <th>Focus Debt</th>
               <th>Focus Payment</th>
+              <th>Focus Principal</th>
               <th>Focus Balance</th>
-              <th>Total Payment</th>
-              <th>Total Interest</th>
+              <th>Min. Due (all bills)</th>
               <th>Total Balance</th>
             </tr>
           </thead>
@@ -633,9 +634,9 @@ function renderStrategyScheduleTable(now, monthNames) {
                   ${focus ? fmt(focus.payment) : '—'}
                   ${focus && focus.extra > 0 ? `<span style="font-size:0.75rem;color:var(--accent);margin-left:4px">(+${fmt(focus.extra)} extra)</span>` : ''}
                 </td>
-                <td class="td-green">${focus ? fmt(focus.balance) : '—'}</td>
-                <td>${fmt(m.totalPayment)}</td>
-                <td class="td-red">${fmt(m.totalInterest)}</td>
+                <td class="td-green">${focus ? fmt(Math.max(0, focus.principal)) : '—'}</td>
+                <td>${focus ? fmt(focus.balance) : '—'}</td>
+                <td>${fmt(m.totalMinDue)}</td>
                 <td><strong>${fmt(m.totalBalance)}</strong></td>
               </tr>
               ${paidOffRow}`;
