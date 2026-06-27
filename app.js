@@ -622,11 +622,28 @@ function renderStrategyScheduleTable(now, monthNames) {
               const label = monthNames[dt.getMonth()] + ' ' + dt.getFullYear();
               const focus = m.perDebt.find(p => p.id === m.focusId);
               cumInt += m.totalInterest;
-              const paidOffRow = m.paidOffThis.length > 0
-                ? `<tr style="background:rgba(79,209,160,0.08)"><td colspan="8" style="text-align:center;font-size:0.8rem;color:var(--accent);padding:6px">✓ Paid off: ${m.paidOffThis.join(', ')}</td></tr>`
+              const activeDebtsThisMonth = m.perDebt.filter(p => p.payment > 0);
+              const subRows = activeDebtsThisMonth.map(p => `
+                <tr style="background:var(--surface-2)">
+                  <td></td>
+                  <td></td>
+                  <td style="padding-left:20px;font-size:0.78rem;color:${p.id === m.focusId ? 'var(--accent)' : 'var(--muted)'}">
+                    ${p.id === m.focusId ? '▶' : '·'} ${p.name}
+                  </td>
+                  <td style="font-size:0.78rem">
+                    ${fmt(p.payment)}
+                    ${p.extra > 0 ? `<span style="font-size:0.72rem;color:var(--accent)"> (+${fmt(p.extra)} extra)</span>` : ''}
+                  </td>
+                  <td style="font-size:0.78rem" class="td-green">${fmt(Math.max(0, p.principal))}</td>
+                  <td style="font-size:0.78rem">${fmt(p.balance)}</td>
+                  <td></td>
+                  <td></td>
+                </tr>`).join('');
+              const projectedRow = m.paidOffThis.length > 0
+                ? `<tr style="background:rgba(79,209,160,0.08)"><td colspan="8" style="text-align:center;font-size:0.8rem;color:var(--accent);padding:6px">🎯 Projected payoff: ${m.paidOffThis.join(', ')} — payment rolls to next target</td></tr>`
                 : '';
               return `
-              <tr>
+              <tr style="border-top:1px solid var(--border)">
                 <td class="td-muted">${m.month}</td>
                 <td>${label}</td>
                 <td style="font-weight:600;color:var(--accent)">${m.focusName || '—'}</td>
@@ -639,7 +656,8 @@ function renderStrategyScheduleTable(now, monthNames) {
                 <td>${fmt(m.totalMinDue)}</td>
                 <td><strong>${fmt(m.totalBalance)}</strong></td>
               </tr>
-              ${paidOffRow}`;
+              ${subRows}
+              ${projectedRow}`;
             }).join('')}
             ${months.length > 180 ? `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:14px">… ${months.length - 180} more months not shown</td></tr>` : ''}
           </tbody>
