@@ -590,7 +590,8 @@ function renderStrategy() {
 
 /* ── Schedule helpers ────────────────────────────────────── */
 function renderStrategyScheduleTable(now, monthNames) {
-  const months = calcStrategySchedule(state.debts, state.extraPayment, state.strategy);
+  const activeDebts = state.debts.filter(d => !state.strategyExcluded.includes(d.id));
+  const months = calcStrategySchedule(activeDebts, state.extraPayment, state.strategy);
   if (!months.length) return '<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">No debts to schedule</div></div>';
   const totalInt = months.reduce((s, m) => s + m.totalInterest, 0);
   let cumInt = 0;
