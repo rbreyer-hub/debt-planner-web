@@ -622,7 +622,7 @@ function renderStrategyScheduleTable(now, monthNames) {
               const label = monthNames[dt.getMonth()] + ' ' + dt.getFullYear();
               const focus = m.perDebt.find(p => p.id === m.focusId);
               cumInt += m.totalInterest;
-              const activeDebtsThisMonth = m.perDebt.filter(p => p.payment > 0);
+              const activeDebtsThisMonth = m.perDebt.filter(p => p.payment > 0 && p.id !== m.focusId);
               const subRows = activeDebtsThisMonth.map(p => `
                 <tr style="background:var(--surface-2)">
                   <td></td>
