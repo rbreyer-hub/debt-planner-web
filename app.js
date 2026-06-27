@@ -34,13 +34,14 @@ let state = {
   strategy: 'snowball',
   extraPayment: 0,
   creditScore: null,
+  strategyExcluded: [],
   calYear: new Date().getFullYear(),
   calMonth: new Date().getMonth(),
   scheduleDebtId: 'all'
 };
 
 function save() {
-  const toSave = { debts: state.debts, strategy: state.strategy, extraPayment: state.extraPayment, creditScore: state.creditScore };
+  const toSave = { debts: state.debts, strategy: state.strategy, extraPayment: state.extraPayment, creditScore: state.creditScore, strategyExcluded: state.strategyExcluded };
   const json = JSON.stringify(toSave);
   localStorage.setItem(STORAGE_KEY, json);
   window.cloudSync?.save(json);
@@ -63,6 +64,7 @@ function load() {
     state.strategy = d.strategy || 'snowball';
     state.extraPayment = d.extraPayment || 0;
     state.creditScore = d.creditScore || 673;
+    state.strategyExcluded = d.strategyExcluded || [];
     if (missing.length > 0) save();
   } catch (e) { /* ignore */ }
 }
@@ -84,6 +86,18 @@ function uid() { return Math.random().toString(36).slice(2, 10); }
 function totalBalance() { return state.debts.reduce((s, d) => s + d.balance, 0); }
 function totalMinPayment() { return state.debts.reduce((s, d) => s + d.minPayment, 0); }
 function totalLimit() { return state.debts.filter(d => d.limit > 0).reduce((s, d) => s + d.limit, 0); }
+function paidThisMonth() {
+  const prefix = new Date().toISOString().slice(0, 7);
+  return state.debts.reduce((sum, d) =>
+    sum + (d.payments || []).filter(p => p.date.startsWith(prefix)).reduce((s, p) => s + p.amount, 0), 0);
+}
+function toggleStrategyExclusion(id) {
+  const idx = state.strategyExcluded.indexOf(id);
+  if (idx >= 0) state.strategyExcluded.splice(idx, 1);
+  else state.strategyExcluded.push(id);
+  save();
+  renderStrategy();
+}
 function totalUtilization() {
   const lim = totalLimit();
   if (!lim) return null;
@@ -382,6 +396,17 @@ function renderDebts() {
           <span style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Monthly Minimums</span>
           <div style="font-size:1.6rem;font-weight:700">${fmt(totalMinPayment())}</div>
         </div>
+        <div>
+          <span style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Total Monthly Payments</span>
+          <div style="font-size:1.6rem;font-weight:700;color:var(--accent)">${fmt(totalMinPayment() + state.extraPayment)}</div>
+          <div style="font-size:0.75rem;color:var(--muted)">${fmt(totalMinPayment())} min${state.extraPayment > 0 ? ' + ' + fmt(state.extraPayment) + ' extra' : ''}</div>
+        </div>
+        ${paidThisMonth() > 0 ? `
+        <div>
+          <span style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Paid This Month</span>
+          <div style="font-size:1.6rem;font-weight:700;color:var(--green)">${fmt(paidThisMonth())}</div>
+        </div>
+        ` : ''}
         ${totalUtilization() !== null ? `
         <div>
           <span style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Overall Utilization</span>
@@ -394,18 +419,80 @@ function renderDebts() {
 }
 
 /* ── Strategy tab ────────────────────────────────────────── */
+function renderPayoffBlock(debts, extraPayment, strategy, label) {
+  const { payoffOrder: snowOrder, totalMonths: snowMonths, totalInterest: snowInt } = calcPayoffSchedule(debts, extraPayment, 'snowball');
+  const { payoffOrder: avaOrder, totalMonths: avaMonths, totalInterest: avaInt } = calcPayoffSchedule(debts, extraPayment, 'avalanche');
+  const currentOrder = strategy === 'snowball' ? snowOrder : avaOrder;
+  const currentMonths = strategy === 'snowball' ? snowMonths : avaMonths;
+  const currentInt = strategy === 'snowball' ? snowInt : avaInt;
+  const activeMin = debts.reduce((s, d) => s + d.minPayment, 0);
+  if (currentOrder.length === 0) return '';
+  return `
+    <div class="card" style="margin-top:16px${label ? ';border:1px dashed var(--border)' : ''}">
+      <h2 style="margin-bottom:4px">${label || 'Payoff Order'}</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:16px">
+        ${strategy === 'snowball' ? 'Smallest balance first — roll each minimum payment forward.' : 'Highest APR first — minimizes total interest paid.'}
+        Total: <strong>${fmtMonth(currentMonths)}</strong> · <strong>${fmt(currentInt)}</strong> in interest
+      </p>
+      <div class="payoff-timeline">
+        ${currentOrder.map(item => {
+          const debtObj = debts.find(d => d.id === item.id);
+          return `
+          <div class="payoff-row">
+            <div class="payoff-num done">${item.order}</div>
+            <div class="payoff-detail">
+              <span class="payoff-name">${item.name}</span>
+              <span class="payoff-meta">${debtObj ? debtObj.apr + '% APR · min ' + fmt(debtObj.minPayment) : ''}</span>
+            </div>
+            <div class="payoff-bal">
+              <div class="amount">${fmt(item.startBalance)}</div>
+              <div class="month">paid off ${fmtMonth(item.month)}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="savings-projection" style="margin-top:16px">
+      <h3>💰 After these debts are paid off…</h3>
+      <p style="font-size:0.85rem;color:var(--muted)">
+        Redirect your ${fmt(activeMin + extraPayment)}/mo into savings or investments:
+      </p>
+      <div class="savings-grid">
+        ${calcSavingsProjection(activeMin + extraPayment, 60).map(s => `
+          <div class="savings-item"><div class="val">${fmt(s.total)}</div><div class="lbl">${s.rate}% · 5 yrs</div></div>
+        `).join('')}
+        ${calcSavingsProjection(activeMin + extraPayment, 120).map(s => `
+          <div class="savings-item"><div class="val">${fmt(s.total)}</div><div class="lbl">${s.rate}% · 10 yrs</div></div>
+        `).join('')}
+      </div>
+    </div>`;
+}
+
 function renderStrategy() {
   const pane = document.getElementById('pane-strategy');
-  const { payoffOrder: snowOrder, totalMonths: snowMonths, totalInterest: snowInt } = calcPayoffSchedule(state.debts, state.extraPayment, 'snowball');
-  const { payoffOrder: avaOrder, totalMonths: avaMonths, totalInterest: avaInt } = calcPayoffSchedule(state.debts, state.extraPayment, 'avalanche');
+  const activeDebts = state.debts.filter(d => !state.strategyExcluded.includes(d.id));
+  const excludedDebts = state.debts.filter(d => state.strategyExcluded.includes(d.id));
 
-  const currentOrder = state.strategy === 'snowball' ? snowOrder : avaOrder;
-  const currentMonths = state.strategy === 'snowball' ? snowMonths : avaMonths;
-  const currentInt = state.strategy === 'snowball' ? snowInt : avaInt;
+  const { totalMonths: snowMonths, totalInterest: snowInt } = calcPayoffSchedule(activeDebts, state.extraPayment, 'snowball');
+  const { totalMonths: avaMonths, totalInterest: avaInt } = calcPayoffSchedule(activeDebts, state.extraPayment, 'avalanche');
 
   pane.innerHTML = `
     <h2 class="section-title">Payoff Strategy</h2>
     <p class="section-sub">Choose your method and see your personalized payoff roadmap.</p>
+
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px">Debt Scope</div>
+      <p style="font-size:0.8rem;color:var(--muted);margin-bottom:12px">Click a debt to exclude it from strategy calculations. Excluded debts keep paying minimums but aren't targeted.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${state.debts.map(d => {
+          const excluded = state.strategyExcluded.includes(d.id);
+          return `<button onclick="toggleStrategyExclusion('${d.id}')" style="padding:5px 12px;border-radius:99px;border:1px solid ${excluded ? 'var(--border)' : 'var(--accent)'};background:${excluded ? 'var(--surface-2)' : 'rgba(79,209,160,0.12)'};color:${excluded ? 'var(--muted)' : 'var(--accent)'};font-size:0.8rem;cursor:pointer;text-decoration:${excluded ? 'line-through' : 'none'}">
+            ${d.name}
+          </button>`;
+        }).join('')}
+      </div>
+      ${excludedDebts.length > 0 ? `<p style="font-size:0.78rem;color:var(--muted);margin-top:10px;margin-bottom:0">${excludedDebts.length} debt${excludedDebts.length > 1 ? 's' : ''} excluded — still paying minimums, just not targeted.</p>` : ''}
+    </div>
 
     <div class="strategy-toggle">
       <button class="strategy-btn ${state.strategy === 'snowball' ? 'active' : ''}" onclick="setStrategy('snowball')">
@@ -441,7 +528,7 @@ function renderStrategy() {
       </div>
       ${state.extraPayment > 0 ? `
         <p style="font-size:0.83rem;color:var(--accent);margin-top:-8px">
-          ✓ ${fmt(state.extraPayment)}/mo extra applied to ${state.strategy === 'snowball' ? 'smallest' : 'highest-APR'} debt
+          ✓ ${fmt(state.extraPayment)}/mo extra applied to ${state.strategy === 'snowball' ? 'smallest' : 'highest-APR'} active debt
         </p>
       ` : `
         <p style="font-size:0.83rem;color:var(--muted);margin-top:-8px">
@@ -450,60 +537,15 @@ function renderStrategy() {
       `}
     </div>
 
-    ${currentOrder.length === 0 ? `
+    ${activeDebts.length === 0 ? `
       <div class="empty-state">
         <div class="empty-icon">🎯</div>
-        <div class="empty-title">No debts to plan</div>
-        <p>Add debts in the My Debts tab first.</p>
+        <div class="empty-title">All debts excluded</div>
+        <p>Re-include at least one debt above to see a payoff plan.</p>
       </div>
-    ` : `
-      <div class="card" style="margin-top:16px">
-        <h2 style="margin-bottom:4px">Payoff Order</h2>
-        <p style="font-size:0.83rem;color:var(--muted);margin-bottom:16px">
-          ${state.strategy === 'snowball' ? 'Smallest balance first — roll each minimum payment forward.' : 'Highest APR first — minimizes total interest paid.'}
-          Total: <strong>${fmtMonth(currentMonths)}</strong> · <strong>${fmt(currentInt)}</strong> in interest
-        </p>
-        <div class="payoff-timeline">
-          ${currentOrder.map(item => {
-            const debtObj = state.debts.find(d => d.id === item.id);
-            return `
-            <div class="payoff-row">
-              <div class="payoff-num done">${item.order}</div>
-              <div class="payoff-detail">
-                <span class="payoff-name">${item.name}</span>
-                <span class="payoff-meta">${debtObj ? debtObj.apr + '% APR · min ' + fmt(debtObj.minPayment) : ''}</span>
-              </div>
-              <div class="payoff-bal">
-                <div class="amount">${fmt(item.startBalance)}</div>
-                <div class="month">paid off ${fmtMonth(item.month)}</div>
-              </div>
-            </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
+    ` : renderPayoffBlock(activeDebts, state.extraPayment, state.strategy, '')}
 
-      <div class="savings-projection" style="margin-top:16px">
-        <h3>💰 After all debts are paid off…</h3>
-        <p style="font-size:0.85rem;color:var(--muted)">
-          Redirect your ${fmt(totalMinPayment() + state.extraPayment)}/mo into savings or investments:
-        </p>
-        <div class="savings-grid">
-          ${calcSavingsProjection(totalMinPayment() + state.extraPayment, 60).map(s => `
-            <div class="savings-item">
-              <div class="val">${fmt(s.total)}</div>
-              <div class="lbl">${s.rate}% · 5 yrs</div>
-            </div>
-          `).join('')}
-          ${calcSavingsProjection(totalMinPayment() + state.extraPayment, 120).map(s => `
-            <div class="savings-item">
-              <div class="val">${fmt(s.total)}</div>
-              <div class="lbl">${s.rate}% · 10 yrs</div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `}
+    ${excludedDebts.length > 0 ? renderPayoffBlock(state.debts, state.extraPayment, state.strategy, 'Full Payoff — All Debts') : ''}
   `;
 }
 
