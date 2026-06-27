@@ -159,6 +159,45 @@ function calcPayoffSchedule(debtsInput, extraPayment, strategy) {
   return { payoffOrder, totalMonths: month, totalInterest };
 }
 
+function calcStrategySchedule(debtsInput, extraPayment, strategy) {
+  let debts = debtsInput.map(d => ({ ...d }));
+  if (strategy === 'snowball') debts.sort((a, b) => a.balance - b.balance);
+  else debts.sort((a, b) => b.apr - a.apr);
+
+  const months = [];
+  let rolledOver = 0;
+  const paidIds = new Set();
+
+  while (debts.some(d => d.balance > 0.005) && months.length < 600) {
+    const priorityIdx = debts.findIndex(d => !paidIds.has(d.id) && d.balance > 0.005);
+    const snap = { month: months.length + 1, focusId: debts[priorityIdx]?.id, focusName: debts[priorityIdx]?.name, perDebt: [], totalPayment: 0, totalInterest: 0, totalBalance: 0, paidOffThis: [] };
+
+    for (let i = 0; i < debts.length; i++) {
+      const d = debts[i];
+      if (d.balance <= 0.005) { snap.perDebt.push({ id: d.id, name: d.name, payment: 0, interest: 0, principal: 0, balance: 0, extra: 0 }); continue; }
+      const monthlyRate = d.apr / 100 / 12;
+      const interest = d.balance * monthlyRate;
+      d.balance += interest;
+      const extra = i === priorityIdx ? extraPayment + rolledOver : 0;
+      const payment = Math.min(d.minPayment + extra, d.balance);
+      const principal = payment - interest;
+      d.balance = Math.max(0, d.balance - payment);
+      snap.perDebt.push({ id: d.id, name: d.name, payment, interest, principal, balance: d.balance, extra });
+      snap.totalPayment += payment;
+      snap.totalInterest += interest;
+      snap.totalBalance += d.balance;
+      if (d.balance < 0.005 && !paidIds.has(d.id)) {
+        d.balance = 0;
+        paidIds.add(d.id);
+        rolledOver += d.minPayment;
+        snap.paidOffThis.push(d.name);
+      }
+    }
+    months.push(snap);
+  }
+  return months;
+}
+
 function calcAmortization(debt, extraPayment = 0) {
   const rows = [];
   let balance = debt.balance;
@@ -549,69 +588,73 @@ function renderStrategy() {
   `;
 }
 
-/* ── Schedule tab ────────────────────────────────────────── */
-function renderSchedule() {
-  const pane = document.getElementById('pane-schedule');
+/* ── Schedule helpers ────────────────────────────────────── */
+function renderStrategyScheduleTable(now, monthNames) {
+  const months = calcStrategySchedule(state.debts, state.extraPayment, state.strategy);
+  if (!months.length) return '<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">No debts to schedule</div></div>';
+  const totalInt = months.reduce((s, m) => s + m.totalInterest, 0);
+  let cumInt = 0;
 
-  const debtOptions = state.debts.map(d => `<option value="${d.id}" ${state.scheduleDebtId === d.id ? 'selected' : ''}>${d.name}</option>`).join('');
-
-  if (state.debts.length === 0) {
-    pane.innerHTML = `<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">No debts to schedule</div><p>Add debts first.</p></div>`;
-    return;
-  }
-
-  let rows = [];
-  let debtName = '';
-  let totalIntPaid = 0;
-
-  if (state.scheduleDebtId === 'all' || !state.scheduleDebtId) {
-    // Combined amortization: show month-by-month totals across all debts
-    const schedule = calcPayoffSchedule(state.debts, state.extraPayment, state.strategy);
-    // Build combined table from individual amortizations
-    const allSchedules = state.debts.map(d => calcAmortization(d, 0));
-    const maxMonths = Math.max(...allSchedules.map(s => s.length));
-    for (let m = 0; m < maxMonths; m++) {
-      let totPay = 0, totInt = 0, totPrin = 0, totBal = 0;
-      allSchedules.forEach(s => {
-        if (m < s.length) {
-          totPay += s[m].payment;
-          totInt += s[m].interest;
-          totPrin += s[m].principal;
-          totBal += s[m].balance;
-        }
-      });
-      totalIntPaid += totInt;
-      rows.push({ month: m + 1, payment: totPay, interest: totInt, principal: totPrin, balance: totBal, totalInterest: totalIntPaid });
-    }
-    debtName = 'All Debts (minimums only)';
-  } else {
-    const debt = state.debts.find(d => d.id === state.scheduleDebtId);
-    if (debt) {
-      rows = calcAmortization(debt, 0);
-      debtName = debt.name;
-    }
-  }
-
-  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const now = new Date();
-
-  pane.innerHTML = `
-    <h2 class="section-title">Amortization Schedule</h2>
-    <p class="section-sub">Month-by-month payment breakdown.</p>
-
-    <div class="schedule-controls">
-      <div class="form-group" style="min-width:200px">
-        <label>Select debt</label>
-        <select onchange="state.scheduleDebtId=this.value;renderSchedule()">
-          <option value="all" ${state.scheduleDebtId === 'all' ? 'selected' : ''}>All Debts</option>
-          ${debtOptions}
-        </select>
-      </div>
-      <div style="font-size:0.83rem;color:var(--muted);padding-top:18px">
-        ${rows.length} months · ${fmt(rows.reduce((s,r)=>s+r.interest,0))} total interest
-      </div>
+  return `
+    <div style="font-size:0.83rem;color:var(--muted);margin-bottom:12px">
+      ${months.length} months · ${fmt(totalInt)} total interest · ${state.extraPayment > 0 ? fmt(state.extraPayment) + '/mo extra applied' : 'minimums only'}
     </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Date</th>
+              <th>Focus Debt</th>
+              <th>Focus Payment</th>
+              <th>Focus Balance</th>
+              <th>Total Payment</th>
+              <th>Total Interest</th>
+              <th>Total Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${months.slice(0, 180).map(m => {
+              const dt = new Date(now.getFullYear(), now.getMonth() + m.month - 1, 1);
+              const label = monthNames[dt.getMonth()] + ' ' + dt.getFullYear();
+              const focus = m.perDebt.find(p => p.id === m.focusId);
+              cumInt += m.totalInterest;
+              const paidOffRow = m.paidOffThis.length > 0
+                ? `<tr style="background:rgba(79,209,160,0.08)"><td colspan="8" style="text-align:center;font-size:0.8rem;color:var(--accent);padding:6px">✓ Paid off: ${m.paidOffThis.join(', ')}</td></tr>`
+                : '';
+              return `
+              <tr>
+                <td class="td-muted">${m.month}</td>
+                <td>${label}</td>
+                <td style="font-weight:600;color:var(--accent)">${m.focusName || '—'}</td>
+                <td>
+                  ${focus ? fmt(focus.payment) : '—'}
+                  ${focus && focus.extra > 0 ? `<span style="font-size:0.75rem;color:var(--accent);margin-left:4px">(+${fmt(focus.extra)} extra)</span>` : ''}
+                </td>
+                <td class="td-green">${focus ? fmt(focus.balance) : '—'}</td>
+                <td>${fmt(m.totalPayment)}</td>
+                <td class="td-red">${fmt(m.totalInterest)}</td>
+                <td><strong>${fmt(m.totalBalance)}</strong></td>
+              </tr>
+              ${paidOffRow}`;
+            }).join('')}
+            ${months.length > 180 ? `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:14px">… ${months.length - 180} more months not shown</td></tr>` : ''}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
 
+function renderSingleDebtTable(now, monthNames) {
+  const debt = state.debts.find(d => d.id === state.scheduleDebtId);
+  if (!debt) return '';
+  const rows = calcAmortization(debt, state.extraPayment);
+  let cumInt = 0;
+  return `
+    <div style="font-size:0.83rem;color:var(--muted);margin-bottom:12px">
+      ${rows.length} months · ${fmt(rows.reduce((s,r)=>s+r.interest,0))} total interest
+    </div>
     <div class="card">
       <div class="table-wrap">
         <table>
@@ -627,9 +670,10 @@ function renderSchedule() {
             </tr>
           </thead>
           <tbody>
-            ${rows.slice(0, 120).map(r => {
+            ${rows.slice(0, 180).map(r => {
               const d = new Date(now.getFullYear(), now.getMonth() + r.month - 1, 1);
               const label = monthNames[d.getMonth()] + ' ' + d.getFullYear();
+              cumInt += r.interest;
               return `
               <tr>
                 <td class="td-muted">${r.month}</td>
@@ -638,15 +682,46 @@ function renderSchedule() {
                 <td class="td-green">${fmt(Math.max(0, r.principal))}</td>
                 <td class="td-red">${fmt(r.interest)}</td>
                 <td><strong>${fmt(r.balance)}</strong></td>
-                <td class="td-muted">${fmt(r.totalInterest)}</td>
-              </tr>
-              `;
+                <td class="td-muted">${fmt(cumInt)}</td>
+              </tr>`;
             }).join('')}
-            ${rows.length > 120 ? `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">… ${rows.length - 120} more months not shown</td></tr>` : ''}
+            ${rows.length > 180 ? `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">… ${rows.length - 180} more months not shown</td></tr>` : ''}
           </tbody>
         </table>
       </div>
+    </div>`;
+}
+
+/* ── Schedule tab ────────────────────────────────────────── */
+function renderSchedule() {
+  const pane = document.getElementById('pane-schedule');
+
+  const debtOptions = state.debts.map(d => `<option value="${d.id}" ${state.scheduleDebtId === d.id ? 'selected' : ''}>${d.name}</option>`).join('');
+
+  if (state.debts.length === 0) {
+    pane.innerHTML = `<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">No debts to schedule</div><p>Add debts first.</p></div>`;
+    return;
+  }
+
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const now = new Date();
+  const isAll = state.scheduleDebtId === 'all' || !state.scheduleDebtId;
+
+  pane.innerHTML = `
+    <h2 class="section-title">Amortization Schedule</h2>
+    <p class="section-sub">Month-by-month payment breakdown.</p>
+
+    <div class="schedule-controls">
+      <div class="form-group" style="min-width:200px">
+        <label>Select debt</label>
+        <select onchange="state.scheduleDebtId=this.value;renderSchedule()">
+          <option value="all" ${isAll ? 'selected' : ''}>All Debts — ${state.strategy === 'snowball' ? 'Snowball' : 'Avalanche'} Strategy</option>
+          ${debtOptions}
+        </select>
+      </div>
     </div>
+
+    ${isAll ? renderStrategyScheduleTable(now, monthNames) : renderSingleDebtTable(now, monthNames)}
   `;
 }
 
