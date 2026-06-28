@@ -3,31 +3,6 @@ const STORAGE_KEY = 'debtPlannerData';
 const DEBT_COLOR_VALUES = ['#4fd1a0','#60a8f0','#f0c060','#f07070','#c060f0','#f09060','#60d0f0','#90f070'];
 function colorValue(idx) { return DEBT_COLOR_VALUES[idx % DEBT_COLOR_VALUES.length]; }
 
-/* Experian report snapshot — Jun 2026. APR + due day left blank for user to fill in. */
-window.EXPERIAN_SEED_DEBTS_IDS = ['seed01','seed02','seed03','seed04','seed05','seed06','seed07','seed08','seed09','seed10','seed11'];
-window.applySeedMerge = function(jsonStr) {
-  try {
-    const parsed = JSON.parse(jsonStr);
-    const existing = parsed.debts || [];
-    const existingIds = new Set(existing.map(x => x.id));
-    const missing = EXPERIAN_SEED_DEBTS.filter(s => !existingIds.has(s.id)).map(s => Object.assign({}, s));
-    if (missing.length === 0) return jsonStr;
-    return JSON.stringify(Object.assign({}, parsed, { debts: [...existing, ...missing] }));
-  } catch (_) { return jsonStr; }
-};
-const EXPERIAN_SEED_DEBTS = [
-  { id:'seed01', name:'Affirm (BNPL #1)',         type:'other',         balance:58,     limit:0,     apr:0, minPayment:42,   dueDay:0 },
-  { id:'seed02', name:'Affirm (BNPL #2)',         type:'other',         balance:99,     limit:0,     apr:0, minPayment:25,   dueDay:0 },
-  { id:'seed03', name:'Capital One',              type:'credit_card',   balance:1764,   limit:2000,  apr:0, minPayment:39,   dueDay:0 },
-  { id:'seed04', name:'Chime Secured Card',       type:'credit_card',   balance:245,    limit:0,     apr:0, minPayment:0,    dueDay:0 },
-  { id:'seed05', name:'Citi',                     type:'credit_card',   balance:3731,   limit:4000,  apr:0, minPayment:103,  dueDay:0 },
-  { id:'seed06', name:'Citi (authorized user)',   type:'credit_card',   balance:6752,   limit:7010,  apr:0, minPayment:197,  dueDay:0 },
-  { id:'seed07', name:'Columbia Bank (Mortgage)', type:'other',         balance:342005, limit:0,     apr:0, minPayment:1997, dueDay:0 },
-  { id:'seed08', name:'Idaho Central CU',         type:'personal_loan', balance:17336,  limit:0,     apr:0, minPayment:438,  dueDay:0 },
-  { id:'seed09', name:'JPMCB Card (auth user)',   type:'credit_card',   balance:9561,   limit:13300, apr:0, minPayment:278,  dueDay:0 },
-  { id:'seed10', name:'SYNCB / Networking',       type:'credit_card',   balance:1196,   limit:1350,  apr:0, minPayment:42,   dueDay:0 },
-  { id:'seed11', name:'SYNCB / Venmo',            type:'credit_card',   balance:404,    limit:640,   apr:0, minPayment:41,   dueDay:0 },
-];
 
 let state = {
   debts: [],
@@ -50,22 +25,13 @@ function save() {
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      state.debts       = EXPERIAN_SEED_DEBTS.map(d => Object.assign({}, d));
-      state.creditScore = 673;
-      save();
-      return;
-    }
+    if (!raw) return;
     const d = JSON.parse(raw);
-    const existing = d.debts || [];
-    const existingIds = new Set(existing.map(x => x.id));
-    const missing = EXPERIAN_SEED_DEBTS.filter(s => !existingIds.has(s.id)).map(s => Object.assign({}, s));
-    state.debts = [...existing, ...missing];
+    state.debts = d.debts || [];
     state.strategy = d.strategy || 'snowball';
     state.extraPayment = d.extraPayment || 0;
-    state.creditScore = d.creditScore || 673;
+    state.creditScore = d.creditScore || null;
     state.strategyExcluded = d.strategyExcluded || [];
-    if (missing.length > 0) save();
   } catch (e) { /* ignore */ }
 }
 
@@ -380,7 +346,6 @@ function renderDebts() {
         <p class="section-sub" style="margin:0">Track all your credit cards, loans, and lines of credit.</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${state.debts.some(d => d.id && d.id.startsWith('seed')) ? '' : `<button class="btn" style="background:var(--surface-2);color:var(--text)" onclick="importExperianDebts()">Import Experian Debts</button>`}
         <button class="btn btn-primary" onclick="openDebtModal()">+ Add Debt</button>
       </div>
     </div>
@@ -1074,15 +1039,6 @@ function savePayment() {
   showToast(`Payment of ${fmt(amount)} recorded. New balance: ${fmt(newBalance)}`);
 }
 
-function importExperianDebts() {
-  const existingIds = new Set(state.debts.map(d => d.id));
-  const toAdd = EXPERIAN_SEED_DEBTS.filter(s => !existingIds.has(s.id)).map(s => Object.assign({}, s));
-  if (toAdd.length === 0) { showToast('All Experian debts already present.'); return; }
-  state.debts = [...state.debts, ...toAdd];
-  save();
-  renderDebts();
-  showToast(`Added ${toAdd.length} Experian debts.`);
-}
 
 /* ── Actions ─────────────────────────────────────────────── */
 function setStrategy(s) {

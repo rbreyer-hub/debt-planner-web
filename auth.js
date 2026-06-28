@@ -197,20 +197,6 @@
     }
 
     startRealtimeSync(user.uid);
-
-    // Merge any missing Experian seed debts into both local and cloud data
-    const localRaw = localStorage.getItem('debtPlannerData');
-    if (localRaw && window.applySeedMerge) {
-      const merged = window.applySeedMerge(localRaw);
-      if (merged !== localRaw) {
-        localStorage.setItem('debtPlannerData', merged);
-        markSaving();
-        try {
-          await debtDataRef(user.uid).set({ data: merged, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-        } catch (e) { console.warn('[DebtSync] seed push failed:', e); }
-        location.reload();
-      }
-    }
   });
 
   /* ── Public API: called from app.js on every save ── */
