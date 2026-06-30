@@ -806,35 +806,70 @@ function calNav(dir) {
 }
 
 /* ── Credit Health tab ───────────────────────────────────── */
+function openCreditTipsModal() { document.getElementById('creditTipsModal').style.display = 'flex'; }
+function closeCreditTipsModal() { document.getElementById('creditTipsModal').style.display = 'none'; }
+
 function renderCredit() {
   const pane = document.getElementById('pane-credit');
   const score = state.creditScore;
   const util = totalUtilization();
 
-  const scoreInfo = score => {
-    if (!score) return { label: '—', cls: '' };
-    if (score < 580) return { label: 'Poor', cls: 'danger', color: '#f07070' };
-    if (score < 670) return { label: 'Fair', cls: 'warn', color: '#f0a060' };
-    if (score < 740) return { label: 'Good', cls: '', color: '#f0d060' };
-    if (score < 800) return { label: 'Very Good', cls: 'good', color: '#a0d060' };
-    return { label: 'Excellent', cls: 'good', color: '#4fd1a0' };
+  const scoreInfo = s => {
+    if (!s) return { label: '—', cls: '', color: 'var(--muted)' };
+    if (s < 580) return { label: 'Poor',      cls: 'danger', color: '#f07070' };
+    if (s < 670) return { label: 'Fair',      cls: 'warn',   color: '#f0a060' };
+    if (s < 740) return { label: 'Good',      cls: '',       color: '#f0d060' };
+    if (s < 800) return { label: 'Very Good', cls: 'good',   color: '#a0d060' };
+    return             { label: 'Excellent',  cls: 'good',   color: '#4fd1a0' };
   };
   const si = scoreInfo(score);
 
-  const tips = [
-    { icon: '📅', title: 'Pay on time, every time', desc: 'Payment history is 35% of your score. Even one missed payment can drop your score 50–100 points. Set up autopay for at least the minimum.' },
-    { icon: '📉', title: 'Lower your utilization below 30%', desc: util !== null ? `Your current utilization is ${util.toFixed(1)}%. ${util > 30 ? 'This is hurting your score. Pay down balances to get below 30%, ideally below 10%.' : 'Good job! Keep it under 30%.'}` : 'Credit utilization makes up 30% of your score. Keep balances below 30% of your limit — ideally below 10% for the best score.' },
-    { icon: '🔒', title: 'Keep old accounts open', desc: 'Credit history length is 15% of your score. Don\'t close your oldest credit cards even if you don\'t use them — they\'re boosting your average account age.' },
-    { icon: '🎯', title: 'Don\'t open too many new accounts', desc: 'New credit is 10% of your score. Each hard inquiry can drop your score 5–10 points. Avoid applying for new credit while paying down debt.' },
-    { icon: '🔄', title: 'Diversify your credit mix', desc: 'Credit mix is 10% of your score. Having a mix of revolving credit (cards) and installment loans (auto, mortgage) can help — but don\'t take on debt just for this.' },
-    { icon: '💬', title: 'Dispute errors on your report', desc: 'Get a free report at annualcreditreport.com. Errors affect ~1 in 5 reports. Disputing and removing errors can quickly boost your score.' },
-    { icon: '🤝', title: 'Become an authorized user', desc: 'Ask a family member with excellent credit to add you as an authorized user on their old card. Their history can appear on your report and boost your score.' },
-    { icon: '⚡', title: 'Use Experian Boost or similar', desc: 'Services like Experian Boost let you add on-time utility, phone, and streaming payments to your credit file — free score bumps for bills you\'re already paying.' },
+  /* ── Score factor current values ── */
+  const revolving = state.debts.filter(d => d.limit > 0);
+  const installment = state.debts.filter(d => ['personal_loan','auto_loan','student_loan'].includes(d.type) && d.balance > 0);
+  const hasMortgage = state.debts.some(d => d.name.toLowerCase().includes('mortgage') && d.balance > 0);
+  const mixTypes = [revolving.length > 0, installment.length > 0, hasMortgage].filter(Boolean).length;
+
+  const utilStatus  = util === null ? null : util < 10 ? 'great' : util < 30 ? 'good' : util < 50 ? 'fair' : 'poor';
+  const utilColor   = util === null ? 'var(--muted)' : util < 10 ? 'var(--accent)' : util < 30 ? 'var(--yellow)' : 'var(--red)';
+  const mixColor    = mixTypes >= 2 ? 'var(--accent)' : mixTypes === 1 ? 'var(--yellow)' : 'var(--muted)';
+  const mixLabel    = mixTypes >= 2 ? `${mixTypes} types — good mix` : mixTypes === 1 ? '1 type — limited' : 'Unknown';
+
+  const factors = [
+    { name: 'Payment History',      weight: 35, value: 'Check credit report',
+      color: 'var(--muted)', desc: 'Pay every bill on time' },
+    { name: 'Credit Utilization',   weight: 30,
+      value: util !== null ? `${util.toFixed(1)}% — ${utilStatus === 'great' ? 'Excellent' : utilStatus === 'good' ? 'Good' : utilStatus === 'fair' ? 'High' : 'Very High'}` : 'No revolving credit',
+      color: utilColor, desc: 'Keep revolving balances below 30%' },
+    { name: 'Credit History Length',weight: 15, value: 'Check credit report',
+      color: 'var(--muted)', desc: 'Older accounts = better' },
+    { name: 'New Credit',           weight: 10, value: 'Check recent inquiries',
+      color: 'var(--muted)', desc: 'Limit hard inquiries' },
+    { name: 'Credit Mix',           weight: 10, value: mixLabel,
+      color: mixColor, desc: 'Cards + loans is ideal' },
   ];
 
+  /* ── Installment loan rows ── */
+  const loanRows = installment.map(d => {
+    const orig = d.originalBalance || d.balance;
+    const pct = orig > 0 ? (d.balance / orig) * 100 : 0;
+    const barColor = pct < 30 ? 'var(--accent)' : pct < 60 ? 'var(--yellow)' : 'var(--red)';
+    return `
+      <div class="util-card">
+        <div class="util-card-name">${d.name} <span style="font-size:0.75rem;color:var(--muted);font-weight:400">(installment)</span></div>
+        <div class="util-bar-wrap">
+          <div class="util-bar" style="width:${Math.min(100,pct)}%;background:${barColor}"></div>
+        </div>
+        <div class="util-pct">${fmt(d.balance)} remaining${orig !== d.balance ? ` of ${fmt(orig)}` : ''} · <strong style="color:${barColor}">${pct.toFixed(1)}% owed</strong></div>
+      </div>`;
+  }).join('');
+
   pane.innerHTML = `
-    <h2 class="section-title">Credit Health</h2>
-    <p class="section-sub">Track your score and learn how to improve it.</p>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <h2 class="section-title" style="margin:0">Credit Health</h2>
+      <button class="btn" style="font-size:0.8rem;padding:6px 12px;background:var(--surface-2);color:var(--text)" onclick="openCreditTipsModal()">💡 8 Ways to Improve</button>
+    </div>
+    <p class="section-sub">Track your score and understand what's driving it.</p>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
       <div class="card">
@@ -852,81 +887,53 @@ function renderCredit() {
             <div class="score-label" style="color:${si.color}">${si.label}</div>
           </div>
           <div class="score-range">
-            <div class="score-range-seg poor"></div>
-            <div class="score-range-seg fair"></div>
-            <div class="score-range-seg good"></div>
-            <div class="score-range-seg vgood"></div>
+            <div class="score-range-seg poor"></div><div class="score-range-seg fair"></div>
+            <div class="score-range-seg good"></div><div class="score-range-seg vgood"></div>
             <div class="score-range-seg excell"></div>
           </div>
           <div class="score-labels">
             <span>300</span><span>Poor</span><span>Fair</span><span>Good</span><span>V.Good</span><span>850</span>
           </div>
-        ` : `<p style="font-size:0.85rem">Enter your score to see personalized guidance. Check Credit Karma, Mint, or your bank app.</p>`}
+        ` : `<p style="font-size:0.85rem">Enter your score to see personalized guidance. Check Credit Karma or your bank app.</p>`}
       </div>
 
       <div class="card">
-        <h2 style="margin-bottom:12px">Score Factors</h2>
+        <h2 style="margin-bottom:14px">Score Factors</h2>
         <div class="factor-list">
-          <div class="factor-item">
-            <div><div class="factor-name">Payment History</div><div class="factor-desc">Pay every bill on time</div></div>
-            <div class="factor-weight">35%</div>
-          </div>
-          <div class="factor-item">
-            <div><div class="factor-name">Credit Utilization</div><div class="factor-desc">Keep balances low vs. limits</div></div>
-            <div class="factor-weight">30%</div>
-          </div>
-          <div class="factor-item">
-            <div><div class="factor-name">Credit History Length</div><div class="factor-desc">Older accounts = better</div></div>
-            <div class="factor-weight">15%</div>
-          </div>
-          <div class="factor-item">
-            <div><div class="factor-name">New Credit</div><div class="factor-desc">Limit hard inquiries</div></div>
-            <div class="factor-weight">10%</div>
-          </div>
-          <div class="factor-item">
-            <div><div class="factor-name">Credit Mix</div><div class="factor-desc">Cards + loans is ideal</div></div>
-            <div class="factor-weight">10%</div>
-          </div>
+          ${factors.map(f => `
+          <div class="factor-item" style="align-items:flex-start;gap:8px">
+            <div style="flex:1;min-width:0">
+              <div class="factor-name">${f.name}</div>
+              <div style="font-size:0.75rem;color:${f.color};font-weight:600;margin-top:2px">${f.value}</div>
+            </div>
+            <div class="factor-weight" style="flex-shrink:0">${f.weight}%</div>
+          </div>`).join('')}
         </div>
       </div>
     </div>
 
-    ${util !== null ? `
+    ${revolving.length > 0 || installment.length > 0 ? `
     <div class="card" style="margin-bottom:16px">
-      <h2 style="margin-bottom:4px">Credit Utilization Breakdown</h2>
-      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:16px">
-        Overall: <strong style="color:${util < 30 ? 'var(--accent)' : 'var(--red)'}">${util.toFixed(1)}%</strong>
-        — aim for under 30%, ideally under 10% per card
-      </p>
+      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px">
+        <h2 style="margin:0">Amounts Owed Breakdown</h2>
+        ${util !== null ? `<span style="font-size:0.85rem;color:${utilColor};font-weight:600">Revolving: ${util.toFixed(1)}%</span>` : ''}
+      </div>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:16px">Aim for revolving cards under 30% · Paying down installment loans improves your score over time</p>
       <div class="util-summary">
-        ${state.debts.filter(d => d.limit > 0).map(d => {
+        ${revolving.map(d => {
           const u = (d.balance / d.limit) * 100;
           const barColor = u < 10 ? 'var(--accent)' : u < 30 ? 'var(--yellow)' : 'var(--red)';
           return `
           <div class="util-card">
             <div class="util-card-name">${d.name}</div>
-            <div class="util-bar-wrap">
-              <div class="util-bar" style="width:${Math.min(100,u)}%;background:${barColor}"></div>
-            </div>
+            <div class="util-bar-wrap"><div class="util-bar" style="width:${Math.min(100,u)}%;background:${barColor}"></div></div>
             <div class="util-pct">${fmt(d.balance)} / ${fmt(d.limit)} · <strong style="color:${barColor}">${u.toFixed(1)}%</strong></div>
-          </div>
-          `;
+          </div>`;
         }).join('')}
+        ${loanRows}
       </div>
     </div>
     ` : ''}
-
-    <div class="card">
-      <h2 style="margin-bottom:16px">8 Ways to Improve Your Score</h2>
-      <div class="tip-list">
-        ${tips.map(t => `
-          <div class="tip-item">
-            <span class="tip-icon">${t.icon}</span>
-            <div class="tip-text"><strong>${t.title}</strong>${t.desc}</div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
   `;
 }
 

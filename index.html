@@ -141,6 +141,26 @@
   </div>
 </div>
 
+<!-- Credit Tips Modal -->
+<div id="creditTipsModal" class="modal-overlay" style="display:none">
+  <div class="modal" style="max-width:520px;max-height:80vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title">💡 8 Ways to Improve Your Score</span>
+      <button class="btn-icon" onclick="closeCreditTipsModal()">✕</button>
+    </div>
+    <div class="tip-list" style="padding:4px 0">
+      <div class="tip-item"><span class="tip-icon">📅</span><div class="tip-text"><strong>Pay on time, every time</strong><br>Payment history is 35% of your score. Even one missed payment can drop your score 50–100 points. Set up autopay for at least the minimum.</div></div>
+      <div class="tip-item"><span class="tip-icon">📉</span><div class="tip-text"><strong>Lower your utilization below 30%</strong><br>Credit utilization is 30% of your score. Keep balances below 30% of your limit — ideally below 10% for the best impact.</div></div>
+      <div class="tip-item"><span class="tip-icon">🔒</span><div class="tip-text"><strong>Keep old accounts open</strong><br>Credit history length is 15% of your score. Don't close your oldest cards — they're boosting your average account age.</div></div>
+      <div class="tip-item"><span class="tip-icon">🎯</span><div class="tip-text"><strong>Don't open too many new accounts</strong><br>New credit is 10% of your score. Each hard inquiry can drop your score 5–10 points. Avoid applying for new credit while paying down debt.</div></div>
+      <div class="tip-item"><span class="tip-icon">🔄</span><div class="tip-text"><strong>Diversify your credit mix</strong><br>Credit mix is 10% of your score. Having revolving credit (cards) and installment loans (auto, mortgage) helps — but don't take on debt just for this.</div></div>
+      <div class="tip-item"><span class="tip-icon">💬</span><div class="tip-text"><strong>Dispute errors on your report</strong><br>Get a free report at annualcreditreport.com. Errors affect ~1 in 5 reports. Removing errors can quickly boost your score.</div></div>
+      <div class="tip-item"><span class="tip-icon">🤝</span><div class="tip-text"><strong>Become an authorized user</strong><br>Ask a family member with excellent credit to add you as an authorized user. Their history can appear on your report and boost your score.</div></div>
+      <div class="tip-item"><span class="tip-icon">⚡</span><div class="tip-text"><strong>Use Experian Boost or similar</strong><br>Experian Boost lets you add on-time utility, phone, and streaming payments to your credit file — free score bumps for bills you're already paying.</div></div>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
@@ -148,6 +168,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="auth.js?v=20260628a"></script>
-<script src="app.js?v=20260628a"></script>
+<script src="app.js?v=20260630a"></script>
 </body>
 </html>
