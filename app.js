@@ -186,6 +186,56 @@ function calcAmortization(debt, extraPayment = 0) {
   return rows;
 }
 
+function renderAmortizationChart(months, debts, today) {
+  if (!months.length || !debts.length) return '';
+
+  const w = 640, h = 240, padL = 46, padR = 12, padT = 12, padB = 26;
+  const innerW = w - padL - padR, innerH = h - padT - padB;
+  const maxBalance = Math.max(...debts.map(d => d.balance), 1);
+  const n = months.length;
+  const xFor = i => padL + (n === 1 ? 0 : (i / (n - 1)) * innerW);
+  const yFor = v => padT + innerH - (Math.max(0, v) / maxBalance) * innerH;
+
+  const lines = debts.map((d, idx) => {
+    const pts = months.map((m, i) => {
+      const entry = m.perDebt.find(p => p.id === d.id);
+      return `${xFor(i).toFixed(1)},${yFor(entry ? entry.balance : 0).toFixed(1)}`;
+    }).join(' ');
+    return `<polyline points="${pts}" fill="none" stroke="${colorValue(idx)}" stroke-width="2" />`;
+  }).join('');
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const val = maxBalance * f;
+    const y = yFor(val);
+    return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${w - padR}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1" />
+            <text x="${padL - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--muted-2)">${fmt(val).replace(/\.00$/, '')}</text>`;
+  }).join('');
+
+  const xTickCount = Math.min(6, n);
+  const xTicks = Array.from({ length: xTickCount }, (_, k) => {
+    const i = xTickCount === 1 ? 0 : Math.round((k / (xTickCount - 1)) * (n - 1));
+    const date = new Date(today.getFullYear(), today.getMonth() + i + 1, 1);
+    return `<text x="${xFor(i).toFixed(1)}" y="${h - padB + 14}" text-anchor="middle" font-size="9" fill="var(--muted-2)">${date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}</text>`;
+  }).join('');
+
+  const legend = debts.map((d, idx) => `
+    <span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.78rem;color:var(--muted)">
+      <span style="width:10px;height:10px;border-radius:2px;background:${colorValue(idx)};display:inline-block"></span>${d.name}
+    </span>`).join('');
+
+  return `
+  <div class="card" style="margin-top:16px">
+    <h2 style="margin-bottom:4px">Balance Over Time</h2>
+    <p style="font-size:0.8rem;color:var(--muted);margin-bottom:12px">Projected monthly balance per debt as payments are applied under your ${state.strategy === 'snowball' ? 'Snowball' : 'Avalanche'} strategy.</p>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block">
+      ${yTicks}
+      ${xTicks}
+      ${lines}
+    </svg>
+    <div style="margin-top:10px">${legend}</div>
+  </div>`;
+}
+
 function calcSavingsProjection(monthlyFreed, months) {
   const rates = [0.04, 0.06, 0.08];
   return rates.map(r => {
@@ -238,6 +288,7 @@ function renderOverview() {
   });
 
   const paidOff = payoffOrder.length > 0 ? payoffOrder[payoffOrder.length - 1] : null;
+  const payoffDate = totalMonths > 0 ? new Date(today.getFullYear(), today.getMonth() + totalMonths, 1) : null;
 
   pane.innerHTML = `
     ${state.debts.length === 0 ? `
@@ -268,6 +319,13 @@ function renderOverview() {
           <div class="stat-value ${totalMonths > 0 ? 'warn' : 'good'}">${totalMonths > 0 ? fmtMonth(totalMonths) : '—'}</div>
           <div class="stat-sub">${state.extraPayment > 0 ? fmt(state.extraPayment) + '/mo extra' : 'minimums only'}</div>
         </div>
+        ${payoffDate ? `
+        <div class="stat-card">
+          <div class="stat-label">Projected Payoff Date</div>
+          <div class="stat-value" style="font-size:1.2rem">${payoffDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>
+          <div class="stat-sub">${strategyLabel} strategy${state.extraPayment > 0 ? ' + ' + fmt(state.extraPayment) + '/mo extra' : ''}</div>
+        </div>
+        ` : ''}
         <div class="stat-card">
           <div class="stat-label">Total Interest</div>
           <div class="stat-value danger">${fmt(totalInterest)}</div>
@@ -308,6 +366,8 @@ function renderOverview() {
         }).join('')}
       </div>
       ` : ''}
+
+      ${renderAmortizationChart(calcStrategySchedule(state.debts, state.extraPayment, state.strategy), state.debts, today)}
 
       ${paidOff && totalMonths > 0 ? `
       <div class="savings-projection">
