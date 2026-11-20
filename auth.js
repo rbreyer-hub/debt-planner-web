@@ -196,6 +196,16 @@
       await pullFromCloud(user.uid, { silent: true });
     }
 
+    /* Budget Planner records payments straight into localStorage; push them up */
+    if (localStorage.getItem('debtPlanner.dirtyFromBudget') === '1') {
+      try {
+        markSaving();
+        await pushLocalToCloud(user.uid);
+        localStorage.removeItem('debtPlanner.dirtyFromBudget');
+        syncLocalTsAfterWrite();
+      } catch (e) { console.warn('[DebtSync] push of budget changes failed:', e); }
+    }
+
     startRealtimeSync(user.uid);
   });
 

@@ -46,6 +46,34 @@ function fmtMonth(m) {
   return y + 'yr' + (mo ? ' ' + mo + 'mo' : '');
 }
 function uid() { return Math.random().toString(36).slice(2, 10); }
+function todayISO() {
+  const n = new Date();
+  return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
+}
+function esc(t) { return String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+/* ── Ledger: every balance change is stored on the debt ──
+   payments:    [{date, amount, note?}]            reduce the balance
+   charges:     [{date, amount, note?}]            increase the balance
+   adjustments: [{date, amount (signed), note?}]   manual balance edits   */
+function debtLedger(debt) {
+  const out = [];
+  (debt.payments    || []).forEach((p, i) => out.push({ kind: 'payment', idx: i, date: p.date, amount: p.amount, delta: -p.amount, note: p.note || '', debtId: debt.id, debtName: debt.name }));
+  (debt.charges     || []).forEach((p, i) => out.push({ kind: 'charge',  idx: i, date: p.date, amount: p.amount, delta:  p.amount, note: p.note || '', debtId: debt.id, debtName: debt.name }));
+  (debt.adjustments || []).forEach((p, i) => out.push({ kind: 'adjust',  idx: i, date: p.date, amount: p.amount, delta:  p.amount, note: p.note || '', debtId: debt.id, debtName: debt.name }));
+  return out;
+}
+function allLedger(debtId) {
+  const debts = debtId && debtId !== 'all' ? state.debts.filter(d => d.id === debtId) : state.debts;
+  return debts.flatMap(debtLedger).sort((a, b) => b.date.localeCompare(a.date));
+}
+/* Balance at the end of `endDate` (YYYY-MM-DD), derived by undoing later activity */
+function balanceAsOf(debts, endDate) {
+  return debts.reduce((sum, d) => {
+    const later = debtLedger(d).filter(e => e.date > endDate).reduce((s, e) => s + e.delta, 0);
+    return sum + d.balance - later;
+  }, 0);
+}
 
 
 /* ── Core calculations ───────────────────────────────────── */
@@ -264,6 +292,7 @@ function renderActiveTab() {
     case 'strategy':  renderStrategy(); break;
     case 'schedule':  renderSchedule(); break;
     case 'calendar':  renderCalendar(); break;
+    case 'history':   renderHistory(); break;
     case 'credit':    renderCredit(); break;
   }
 }
@@ -443,6 +472,7 @@ function renderDebts() {
               <span class="debt-balance">${fmt(d.balance)}</span>
               <div class="debt-actions">
                 <button class="btn-icon" title="Make Payment" onclick="openPaymentModal('${d.id}')">💳</button>
+                <button class="btn-icon" title="Add to Balance (new charge)" onclick="openChargeModal('${d.id}')">➕</button>
                 <button class="btn-icon" title="Edit" onclick="openDebtModal('${d.id}')">✏️</button>
                 <button class="btn-icon danger" title="Delete" onclick="deleteDebt('${d.id}')">🗑️</button>
               </div>
@@ -1039,7 +1069,12 @@ function saveDebt() {
   if (id) {
     const idx = state.debts.findIndex(d => d.id === id);
     if (idx >= 0) {
-      state.debts[idx] = { ...state.debts[idx], name, type, balance, limit, apr, minPayment, dueDay };
+      const old = state.debts[idx];
+      const diff = Math.round((balance - old.balance) * 100) / 100;
+      state.debts[idx] = { ...old, name, type, balance, limit, apr, minPayment, dueDay };
+      if (diff !== 0) {
+        state.debts[idx].adjustments = [...(old.adjustments || []), { date: todayISO(), amount: diff, note: 'Manual balance edit' }];
+      }
     }
   } else {
     state.debts.push({ id: uid(), name, type, balance, limit, apr, minPayment, dueDay, originalBalance: balance });
@@ -1107,6 +1142,156 @@ function savePayment() {
 }
 
 
+/* ── Charge modal (add to balance) ───────────────────────── */
+function openChargeModal(id) {
+  const debt = state.debts.find(d => d.id === id);
+  if (!debt) return;
+  document.getElementById('chargeDebtId').value = id;
+  document.getElementById('chargeDebtName').textContent = debt.name;
+  document.getElementById('chargeDebtBalance').textContent = 'Current balance: ' + fmt(debt.balance);
+  document.getElementById('chargeAmount').value = '';
+  document.getElementById('chargeDate').value = todayISO();
+  document.getElementById('chargeNote').value = '';
+  document.getElementById('chargeModal').style.display = 'flex';
+  document.getElementById('chargeAmount').focus();
+}
+function closeChargeModal() { document.getElementById('chargeModal').style.display = 'none'; }
+
+function saveCharge() {
+  const id = document.getElementById('chargeDebtId').value;
+  const amount = parseFloat(document.getElementById('chargeAmount').value);
+  const date = document.getElementById('chargeDate').value;
+  const note = document.getElementById('chargeNote').value.trim();
+  if (!amount || amount <= 0) { showToast('Enter a valid amount to add.'); return; }
+  if (!date) { showToast('Enter a date.'); return; }
+  const idx = state.debts.findIndex(d => d.id === id);
+  if (idx < 0) return;
+  const debt = state.debts[idx];
+  const newBalance = Math.round((debt.balance + amount) * 100) / 100;
+  const charge = { date, amount };
+  if (note) charge.note = note;
+  state.debts[idx] = { ...debt, balance: newBalance, charges: [...(debt.charges || []), charge] };
+  save();
+  closeChargeModal();
+  renderActiveTab();
+  showToast(`Added ${fmt(amount)}. New balance: ${fmt(newBalance)}`);
+}
+
+/* ── History & statements ────────────────────────────────── */
+let historyDebtId = 'all';
+const KIND_LABEL = { payment: 'Payment', charge: 'Charge', adjust: 'Adjustment' };
+
+function setHistoryDebt(id) { historyDebtId = id; renderHistory(); }
+
+function deleteLedgerEntry(debtId, kind, idx) {
+  if (!confirm('Delete this entry? The debt balance will be reversed accordingly.')) return;
+  const di = state.debts.findIndex(d => d.id === debtId);
+  if (di < 0) return;
+  const debt = { ...state.debts[di] };
+  const key = kind === 'payment' ? 'payments' : kind === 'charge' ? 'charges' : 'adjustments';
+  const list = [...(debt[key] || [])];
+  const entry = list[idx];
+  if (!entry) return;
+  const delta = kind === 'payment' ? -entry.amount : entry.amount;
+  list.splice(idx, 1);
+  debt[key] = list;
+  debt.balance = Math.max(0, Math.round((debt.balance - delta) * 100) / 100);
+  state.debts[di] = debt;
+  save();
+  renderHistory();
+  showToast('Entry deleted, balance updated.');
+}
+
+function monthLabel(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function renderHistory() {
+  const pane = document.getElementById('pane-history');
+  if (historyDebtId !== 'all' && !state.debts.some(d => d.id === historyDebtId)) historyDebtId = 'all';
+  const debts = historyDebtId === 'all' ? state.debts : state.debts.filter(d => d.id === historyDebtId);
+  const ledger = allLedger(historyDebtId);
+
+  const header = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+      <div>
+        <h2 class="section-title">History &amp; Statements</h2>
+        <p class="section-sub" style="margin:0">Every payment, new charge, and balance edit, with a monthly statement.</p>
+      </div>
+      <select onchange="setHistoryDebt(this.value)" style="max-width:260px">
+        <option value="all">All Debts</option>
+        ${state.debts.map(d => `<option value="${d.id}" ${d.id === historyDebtId ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}
+      </select>
+    </div>`;
+
+  if (state.debts.length === 0 || ledger.length === 0) {
+    pane.innerHTML = header + `<div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">No activity yet</div><p>Payments, charges, and balance edits will show up here. Payments made in Budget Planner are recorded automatically.</p></div>`;
+    return;
+  }
+
+  // Statements: one row per month from first activity through this month
+  const months = [...new Set(ledger.map(e => e.date.slice(0, 7)))];
+  const curYM = todayISO().slice(0, 7);
+  if (!months.includes(curYM)) months.push(curYM);
+  months.sort().reverse();
+
+  const statements = months.map(ym => {
+    const [y, m] = ym.split('-').map(Number);
+    const end = ym + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0');
+    const prevEnd = new Date(y, m - 1, 0);
+    const start = prevEnd.getFullYear() + '-' + String(prevEnd.getMonth() + 1).padStart(2, '0') + '-' + String(prevEnd.getDate()).padStart(2, '0');
+    const items = ledger.filter(e => e.date.startsWith(ym));
+    const sum = k => items.filter(e => e.kind === k).reduce((s, e) => s + e.amount, 0);
+    const adj = sum('adjust');
+    return { ym, opening: balanceAsOf(debts, start), closing: balanceAsOf(debts, end), payments: sum('payment'), charges: sum('charge'), adj, count: items.length };
+  });
+
+  const stmtHtml = statements.map(s => `
+    <tr>
+      <td><strong>${monthLabel(s.ym)}</strong></td>
+      <td>${fmt(s.opening)}</td>
+      <td style="color:var(--green)">${s.payments > 0 ? '−' + fmt(s.payments) : '—'}</td>
+      <td style="color:var(--red)">${s.charges > 0 ? '+' + fmt(s.charges) : '—'}</td>
+      <td style="color:var(--muted)">${s.adj !== 0 ? (s.adj > 0 ? '+' : '−') + fmt(s.adj) : '—'}</td>
+      <td><strong>${fmt(s.closing)}</strong></td>
+    </tr>`).join('');
+
+  const txHtml = ledger.map(e => {
+    const isPay = e.kind === 'payment';
+    const sign = e.delta < 0 ? '−' : '+';
+    const color = isPay ? 'var(--green)' : e.kind === 'charge' ? 'var(--red)' : 'var(--muted)';
+    const src = /^Budget Planner/.test(e.note) ? '<span style="font-size:0.7rem;background:var(--surface-2);padding:1px 6px;border-radius:99px;margin-left:6px">Budget Planner</span>' : '';
+    return `
+    <tr>
+      <td>${esc(e.date)}</td>
+      ${historyDebtId === 'all' ? `<td>${esc(e.debtName)}</td>` : ''}
+      <td>${KIND_LABEL[e.kind]}${src}</td>
+      <td style="color:var(--muted)">${esc(e.note.replace(/^Budget Planner( \(auto\))?$/, e.note.includes('auto') ? 'Auto-recorded' : ''))}</td>
+      <td style="color:${color};text-align:right"><strong>${sign}${fmt(e.amount)}</strong></td>
+      <td style="text-align:right"><button class="btn-icon danger" title="Delete entry" onclick="deleteLedgerEntry('${e.debtId}','${e.kind}',${e.idx})">🗑️</button></td>
+    </tr>`;
+  }).join('');
+
+  pane.innerHTML = header + `
+    <div class="card" style="margin-bottom:20px;overflow-x:auto">
+      <h3 style="margin-bottom:12px">Monthly Statements</h3>
+      <table class="data-table" style="width:100%">
+        <thead><tr><th>Month</th><th>Opening</th><th>Payments</th><th>New Charges</th><th>Adjustments</th><th>Closing</th></tr></thead>
+        <tbody>${stmtHtml}</tbody>
+      </table>
+      <p style="font-size:0.75rem;color:var(--muted);margin-top:10px">Interest isn't tracked automatically — if your lender adds interest, use ➕ Add to Balance so statements stay accurate.</p>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <h3 style="margin-bottom:12px">Transactions</h3>
+      <table class="data-table" style="width:100%">
+        <thead><tr><th>Date</th>${historyDebtId === 'all' ? '<th>Debt</th>' : ''}<th>Type</th><th>Note</th><th style="text-align:right">Amount</th><th></th></tr></thead>
+        <tbody>${txHtml}</tbody>
+      </table>
+    </div>`;
+}
+
+
 /* ── Actions ─────────────────────────────────────────────── */
 function setStrategy(s) {
   state.strategy = s;
@@ -1149,5 +1334,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('paymentModal').addEventListener('click', (e) => {
     if (e.target === document.getElementById('paymentModal')) closePaymentModal();
+  });
+  document.getElementById('chargeModal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('chargeModal')) closeChargeModal();
   });
 });
