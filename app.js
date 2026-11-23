@@ -85,7 +85,21 @@ function paidThisMonth() {
   return state.debts.reduce((sum, d) =>
     sum + (d.payments || []).filter(p => p.date.startsWith(prefix)).reduce((s, p) => s + p.amount, 0), 0);
 }
+/* Personal loans are repaid on their own schedule: never part of the snowball/avalanche. */
+const isStrategyExcluded = d => d.type === 'personal_loan' || state.strategyExcluded.includes(d.id);
+const nonLoanDebts = () => state.debts.filter(d => d.type !== 'personal_loan');
+const parseISODate = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const fmtShortDate = s => parseISODate(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+/* A debt with a first-payment date has no payments due before that date. */
+const dueOnOrAfterFirst = (d, date) => !d.firstPaymentDate || date >= parseISODate(d.firstPaymentDate);
+function dueLabel(d) {
+  const future = d.firstPaymentDate && parseISODate(d.firstPaymentDate) > new Date();
+  return future ? { label: 'First payment', text: fmtShortDate(d.firstPaymentDate) } : { label: 'Due', text: 'Day ' + d.dueDay };
+}
+
 function toggleStrategyExclusion(id) {
+  const debt = state.debts.find(d => d.id === id);
+  if (debt && debt.type === 'personal_loan') { showToast('Personal loans are repaid on their own schedule, not the snowball.'); return; }
   const idx = state.strategyExcluded.indexOf(id);
   if (idx >= 0) state.strategyExcluded.splice(idx, 1);
   else state.strategyExcluded.push(id);
@@ -302,7 +316,7 @@ function renderOverview() {
   const pane = document.getElementById('pane-overview');
   const total = totalBalance();
   const minPay = totalMinPayment();
-  const { payoffOrder, totalMonths, totalInterest } = calcPayoffSchedule(state.debts, state.extraPayment, state.strategy);
+  const { payoffOrder, totalMonths, totalInterest } = calcPayoffSchedule(nonLoanDebts(), state.extraPayment, state.strategy);
   const util = totalUtilization();
 
   const strategyLabel = state.strategy === 'snowball' ? 'Snowball' : 'Avalanche';
@@ -313,6 +327,7 @@ function renderOverview() {
     if (!d.dueDay) return;
     let due = new Date(today.getFullYear(), today.getMonth(), d.dueDay);
     if (due < today) due = new Date(today.getFullYear(), today.getMonth() + 1, d.dueDay);
+    if (d.firstPaymentDate && due < parseISODate(d.firstPaymentDate)) due = parseISODate(d.firstPaymentDate);
     if (!nextDue || due < nextDue.date) nextDue = { date: due, name: d.name, amount: d.minPayment };
   });
 
@@ -396,7 +411,7 @@ function renderOverview() {
       </div>
       ` : ''}
 
-      ${renderAmortizationChart(calcStrategySchedule(state.debts, state.extraPayment, state.strategy), state.debts, today)}
+      ${renderAmortizationChart(calcStrategySchedule(nonLoanDebts(), state.extraPayment, state.strategy), nonLoanDebts(), today)}
 
       ${paidOff && totalMonths > 0 ? `
       <div class="savings-projection">
@@ -463,7 +478,7 @@ function renderDebts() {
               <div class="debt-meta">
                 <span>APR: <strong style="color:var(--text)">${d.apr}%</strong></span>
                 <span>Min: <strong style="color:var(--text)">${fmt(d.minPayment)}/mo</strong></span>
-                ${d.dueDay ? `<span>Due: <strong style="color:var(--text)">Day ${d.dueDay}</strong></span>` : ''}
+                ${d.dueDay ? `<span>${dueLabel(d).label}: <strong style="color:var(--text)">${dueLabel(d).text}</strong></span>` : ''}
                 ${d.limit > 0 ? `<span>Limit: <strong style="color:var(--text)">${fmt(d.limit)}</strong></span>` : ''}
                 ${d.payments && d.payments.length > 0 ? `<span>Last paid: <strong style="color:var(--green)">${fmt(d.payments[d.payments.length-1].amount)} on ${d.payments[d.payments.length-1].date}</strong></span>` : ''}
               </div>
@@ -565,8 +580,8 @@ function renderPayoffBlock(debts, extraPayment, strategy, label) {
 
 function renderStrategy() {
   const pane = document.getElementById('pane-strategy');
-  const activeDebts = state.debts.filter(d => !state.strategyExcluded.includes(d.id));
-  const excludedDebts = state.debts.filter(d => state.strategyExcluded.includes(d.id));
+  const activeDebts = state.debts.filter(d => !isStrategyExcluded(d));
+  const excludedDebts = state.debts.filter(d => isStrategyExcluded(d));
 
   const { totalMonths: snowMonths, totalInterest: snowInt } = calcPayoffSchedule(activeDebts, state.extraPayment, 'snowball');
   const { totalMonths: avaMonths, totalInterest: avaInt } = calcPayoffSchedule(activeDebts, state.extraPayment, 'avalanche');
@@ -580,7 +595,7 @@ function renderStrategy() {
       <p style="font-size:0.8rem;color:var(--muted);margin-bottom:12px">Click a debt to exclude it from strategy calculations. Excluded debts keep paying minimums but aren't targeted.</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
         ${state.debts.map(d => {
-          const excluded = state.strategyExcluded.includes(d.id);
+          const excluded = isStrategyExcluded(d);
           return `<button onclick="toggleStrategyExclusion('${d.id}')" style="padding:5px 12px;border-radius:99px;border:1px solid ${excluded ? 'var(--border)' : 'var(--accent)'};background:${excluded ? 'var(--surface-2)' : 'rgba(79,209,160,0.12)'};color:${excluded ? 'var(--muted)' : 'var(--accent)'};font-size:0.8rem;cursor:pointer;text-decoration:${excluded ? 'line-through' : 'none'}">
             ${d.name}
           </button>`;
@@ -646,7 +661,7 @@ function renderStrategy() {
 
 /* ── Schedule helpers ────────────────────────────────────── */
 function renderStrategyScheduleTable(now, monthNames) {
-  const activeDebts = state.debts.filter(d => !state.strategyExcluded.includes(d.id));
+  const activeDebts = state.debts.filter(d => !isStrategyExcluded(d));
   const months = calcStrategySchedule(activeDebts, state.extraPayment, state.strategy);
   if (!months.length) return '<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">No debts to schedule</div></div>';
   const totalInt = months.reduce((s, m) => s + m.totalInterest, 0);
@@ -817,9 +832,12 @@ function renderCalendar() {
   state.debts.forEach((d, i) => {
     if (!d.dueDay) return;
     const day = Math.min(d.dueDay, daysInMonth);
+    if (!dueOnOrAfterFirst(d, new Date(year, month, day))) return;   // loan's first payment is still ahead
     if (!paymentsByDay[day]) paymentsByDay[day] = [];
     paymentsByDay[day].push({ name: d.name, amount: d.minPayment, color: colorValue(i), colorStr: colorValue(i) });
   });
+
+  const dueInView = state.debts.filter(d => d.dueDay && dueOnOrAfterFirst(d, new Date(year, month, Math.min(d.dueDay, daysInMonth))));
 
   // Build calendar cells
   let cells = [];
@@ -860,14 +878,14 @@ function renderCalendar() {
       </div>
     </div>
 
-    ${state.debts.filter(d => d.dueDay).length === 0 ? `
+    ${dueInView.length === 0 ? `
       <div style="text-align:center;padding:20px;color:var(--muted);font-size:0.88rem">
-        No due dates set. Edit your debts to add due day numbers.
+        No payments due this month. Edit your debts to add due dates.
       </div>
     ` : `
       <div class="card" style="margin-top:16px">
         <h2 style="margin-bottom:14px">This Month's Payments</h2>
-        ${state.debts.filter(d => d.dueDay).sort((a,b) => a.dueDay - b.dueDay).map((d, i) => `
+        ${dueInView.slice().sort((a,b) => a.dueDay - b.dueDay).map((d, i) => `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:8px;height:8px;border-radius:50%;background:${colorValue(i)}"></div>
@@ -881,7 +899,7 @@ function renderCalendar() {
         `).join('')}
         <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 0">
           <strong>Total due this month</strong>
-          <strong style="font-size:1.1rem">${fmt(state.debts.filter(d=>d.dueDay).reduce((s,d)=>s+d.minPayment,0))}</strong>
+          <strong style="font-size:1.1rem">${fmt(dueInView.reduce((s,d)=>s+d.minPayment,0))}</strong>
         </div>
       </div>
     `}
@@ -1028,6 +1046,21 @@ function renderCredit() {
 }
 
 /* ── Debt modal ──────────────────────────────────────────── */
+/* Personal loans can be added to the Budget Planner balance as income (the Budget Planner reads
+   debt.proceeds = { include, amount, date } and keeps one matching deposit). */
+let proceedsAmtTouched = false;
+function updateProceedsUI() {
+  const isLoan = document.getElementById('debtType').value === 'personal_loan';
+  document.getElementById('dueDayRow').style.display = isLoan ? 'none' : '';
+  document.getElementById('firstPayRow').style.display = isLoan ? '' : 'none';
+  const on = document.getElementById('debtProceeds').checked;
+  document.getElementById('proceedsRow').style.display = isLoan ? '' : 'none';
+  document.getElementById('proceedsFields').style.display = isLoan && on ? '' : 'none';
+  if (isLoan && on && !proceedsAmtTouched) {
+    document.getElementById('debtProceedsAmt').value = document.getElementById('debtBalance').value;   // follows the loan amount until edited
+  }
+}
+
 function openDebtModal(id) {
   const debt = id ? state.debts.find(d => d.id === id) : null;
   const modal = document.getElementById('debtModal');
@@ -1042,6 +1075,20 @@ function openDebtModal(id) {
   document.getElementById('debtAPR').value = debt ? debt.apr : '';
   document.getElementById('debtMin').value = debt ? debt.minPayment : '';
   document.getElementById('debtDueDay').value = debt ? (debt.dueDay || '') : '';
+
+  /* New personal loans default to "add to balance"; existing debts keep whatever they had (no retroactive income). */
+  const pr = debt && debt.proceeds;
+  document.getElementById('debtProceeds').checked = debt ? !!(pr && pr.include) : true;
+  document.getElementById('debtProceedsAmt').value = pr && pr.amount ? pr.amount : (debt ? (debt.originalBalance || debt.balance || '') : '');
+  document.getElementById('debtProceedsDate').value = pr && pr.date ? pr.date : todayISO();
+  proceedsAmtTouched = !!debt;
+  /* Personal loans get a calendar for the first payment (monthly after that). New loans default to a month from today. */
+  const firstPay = document.getElementById('debtFirstPay');
+  const inAMonth = new Date(); inAMonth.setMonth(inAMonth.getMonth() + 1);
+  const iso = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  firstPay.value = debt ? (debt.firstPaymentDate || '') : iso(inAMonth);
+  firstPay.min = debt ? '' : todayISO();
+  updateProceedsUI();
 
   modal.style.display = 'flex';
   document.getElementById('debtName').focus();
@@ -1059,10 +1106,25 @@ function saveDebt() {
   const limit = parseFloat(document.getElementById('debtLimit').value) || 0;
   const apr = parseFloat(document.getElementById('debtAPR').value) || 0;
   const minPayment = parseFloat(document.getElementById('debtMin').value) || 0;
-  const dueDay = parseInt(document.getElementById('debtDueDay').value) || 0;
+  let dueDay = parseInt(document.getElementById('debtDueDay').value) || 0;
+  const isLoanType = type === 'personal_loan';
+  const firstPay = isLoanType ? document.getElementById('debtFirstPay').value : '';
+  if (isLoanType && firstPay) dueDay = Number(firstPay.slice(8, 10));   // monthly on that day
 
   if (!name || balance <= 0 || minPayment <= 0) {
     showToast('Please fill in name, balance, and minimum payment.');
+    return;
+  }
+
+  if (isLoanType && !id && !firstPay) {
+    showToast('Pick the date of the first payment.');
+    return;
+  }
+  const addProceeds = type === 'personal_loan' && document.getElementById('debtProceeds').checked;
+  const pAmt = parseFloat(document.getElementById('debtProceedsAmt').value) || 0;
+  const pDate = document.getElementById('debtProceedsDate').value;
+  if (addProceeds && (pAmt <= 0 || !pDate)) {
+    showToast('Enter the amount and date you received the loan, or uncheck the box.');
     return;
   }
 
@@ -1072,12 +1134,18 @@ function saveDebt() {
       const old = state.debts[idx];
       const diff = Math.round((balance - old.balance) * 100) / 100;
       state.debts[idx] = { ...old, name, type, balance, limit, apr, minPayment, dueDay };
+      if (isLoanType && firstPay) state.debts[idx].firstPaymentDate = firstPay;
+      else if (!isLoanType) delete state.debts[idx].firstPaymentDate;
+      if (addProceeds) state.debts[idx].proceeds = { include: true, amount: pAmt, date: pDate };
+      else if (old.proceeds) state.debts[idx].proceeds = { ...old.proceeds, include: false };   // un-checked: Budget Planner removes its deposit
       if (diff !== 0) {
         state.debts[idx].adjustments = [...(old.adjustments || []), { date: todayISO(), amount: diff, note: 'Manual balance edit' }];
       }
     }
   } else {
-    state.debts.push({ id: uid(), name, type, balance, limit, apr, minPayment, dueDay, originalBalance: balance });
+    state.debts.push({ id: uid(), name, type, balance, limit, apr, minPayment, dueDay, originalBalance: balance,
+      ...(isLoanType && firstPay ? { firstPaymentDate: firstPay } : {}),
+      ...(addProceeds ? { proceeds: { include: true, amount: pAmt, date: pDate } } : {}) });
   }
 
   save();
