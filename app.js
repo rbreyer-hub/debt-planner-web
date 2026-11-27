@@ -485,7 +485,7 @@ function renderDebts() {
                 ${d.payments && d.payments.length > 0 ? `<span>Last paid: <strong style="color:var(--green)">${fmt(d.payments[d.payments.length-1].amount)} on ${d.payments[d.payments.length-1].date}</strong></span>` : ''}
               </div>
             </div>
-            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+            <div class="debt-side">
               <span class="debt-balance">${fmt(d.balance)}</span>
               <div class="debt-actions">
                 <button class="btn-icon" title="Make Payment" onclick="openPaymentModal('${d.id}')">💳</button>

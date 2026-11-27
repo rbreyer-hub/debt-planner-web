@@ -309,6 +309,7 @@ select option { background: var(--surface); }
 .debt-meta span { display: flex; align-items: center; gap: 4px; }
 .debt-balance { font-size: 1.1rem; font-weight: 700; }
 .debt-actions { display: flex; gap: 6px; align-items: center; }
+.debt-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .debt-utilization {
   font-size: 0.75rem;
   padding: 2px 7px;
@@ -577,9 +578,14 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   h1 { font-size: 1.5rem; }
   .main { padding: calc(var(--nav-h) + 20px) 16px 60px; }
   .card { padding: 16px; }
-  .debt-item { grid-template-columns: 4px 1fr; }
-  .debt-actions { display: none; }
-  .debt-item:hover .debt-actions { display: flex; }
+  .debt-item { grid-template-columns: 4px 1fr; gap: 10px 12px; padding: 14px 16px; }
+  .debt-color-bar { grid-row: 1 / span 2; align-self: stretch; }
+  .debt-info { min-width: 0; }
+  .debt-meta { gap: 2px 14px; }
+  .debt-side {
+    grid-column: 2; flex-direction: row; align-items: center; justify-content: space-between;
+    padding-top: 10px; border-top: 1px solid var(--border);
+  }
   .tab-btn { padding: 6px 10px; font-size: 0.78rem; }
 
   /* Mobile nav: brand + auth on row 1, full-width scrollable tabs on row 2 */
