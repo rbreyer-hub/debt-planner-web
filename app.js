@@ -295,6 +295,8 @@ let activeTab = 'overview';
 function switchTab(id) {
   activeTab = id;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  const activeBtn = document.querySelector(`.tab-btn[data-tab="${id}"]`);
+  if (activeBtn) activeBtn.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + id));
   renderActiveTab();
 }

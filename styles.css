@@ -581,6 +581,18 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   .debt-actions { display: none; }
   .debt-item:hover .debt-actions { display: flex; }
   .tab-btn { padding: 6px 10px; font-size: 0.78rem; }
+
+  /* Mobile nav: brand + auth on row 1, full-width scrollable tabs on row 2 */
+  :root { --nav-h: 100px; }
+  .nav { height: auto; min-height: var(--nav-h); }
+  .nav-inner { flex-wrap: wrap; padding: 8px 16px 6px; row-gap: 6px; }
+  .auth-area { margin-left: auto; }
+  .auth-user-name { display: none; }
+  .tab-nav {
+    order: 3; flex-grow: 0; flex-shrink: 0; min-width: 0;
+    margin: 0 -16px; padding: 0 16px; flex-basis: calc(100% + 32px);
+    -webkit-overflow-scrolling: touch;
+  }
   .extra-input-row { flex-direction: column; align-items: stretch; }
   .extra-input-row .form-group { max-width: 100%; }
   .strategy-toggle { flex-direction: column; }
